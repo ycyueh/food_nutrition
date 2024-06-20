@@ -1,0 +1,225 @@
+library(readxl)
+library(stats)
+library(corrplot) #for plot correlation
+library(reshape2)#for ggplot 輸入
+library(ggplot2)
+library(factoextra)
+library(tidyverse)
+library(MASS)
+library(psych) 
+library(car)
+load("C:\\Users\\USER\\Desktop\\11202\\多變量\\期末\\new\\取log轉換\\lndata.Rdata")
+############原始資料#########
+cor_matrix = cor(nd3[,-1])
+
+# 找出所有大於 0.95 的元素的索引位置
+ind<-which(abs(cor_matrix) > 0.95, arr.ind = TRUE)
+lda_data<-nd3
+##filter 觀察值過少的類別
+small<-names(which(table(lda_data$食品分類)<ncol(lda_data)-1))
+
+lda_df <- lda_data |> 
+  filter(!食品分類 %in% small)
+
+#### run lda ####
+#scale the data
+lda_data2<-lda_df 
+lda_data2[,2:ncol(lda_data2)]<-scale(lda_data2[,2:ncol(lda_data2)])
+Or_test_lda = rep(NA,100)
+Or_train_lda = rep(NA,100)
+
+for (i in 1:100) {
+  set.seed(i)
+  #create the training and testing data
+  sample <- sample(c(TRUE, FALSE), nrow(lda_data2), replace=TRUE, prob=c(0.7,0.3))
+  train <- lda_data2[sample, ]
+  test <- lda_data2[!sample, ] 
+  lda_O<-lda(食品分類~.,data=train)
+  train_pred_O<-predict(lda_O, train)
+  
+  test_pred_O<-predict(lda_O, test)
+  
+  (Or_test_lda[i]<-mean(test_pred_O$class==test$食品分類))
+  (Or_train_lda[i]<-mean(train_pred_O$class==train$食品分類))
+}
+Or_train_lda<-mean(Or_train_lda)
+Or_test_lda<-mean(Or_test_lda)
+#define data to plot
+lda_plot <- cbind(train, predict(lda_O)$x)
+
+#create plot
+lda_plot |> 
+  filter(食品分類=='魚貝類'|食品分類=='水果類'|食品分類=='油脂類'|食品分類=='堅果及種子類') |> 
+  ggplot( aes(LD1, LD2)) +
+    geom_point(aes(color = 食品分類,alpha = 0.7))
+
+##### svm ####
+svm_data<-lda_df
+library(e1071)
+svm_data$食品分類<-svm_data$食品分類 |> 
+  as.factor()
+smp.size = floor(0.7*nrow(svm_data)) 
+Or_train_svm<-rep(NA,100)
+Or_test_svm<-rep(NA,100)
+
+for (i in 1:100) {
+  set.seed(i)                     
+  train.ind = sample(seq_len(nrow(svm_data)), smp.size)
+  train = svm_data[train.ind, ] # 70%
+  test = svm_data[-train.ind, ] # 30%
+  model = svm(formula =  食品分類~ .,  # 依變數(在這裡是Type)的資料形態要是Factor
+              data = train)
+  
+  # 可以看到SVM預設的參數設定
+  #summary(model)
+  train_pred_O_svm = predict(model, train)
+  test_pred_O_svm = predict(model, test)
+  
+  # 訓練資料的混淆矩陣
+  confus.matrix = table(real=train$食品分類, predict=train_pred_O_svm)
+  (Or_train_svm[i]<-sum(diag(confus.matrix))/sum(confus.matrix))
+  # 測試資料的分類準確率
+  confus.matrix = table(real=test$食品分類, predict=test_pred_O_svm)
+  (Or_test_svm[i]<-sum(diag(confus.matrix))/sum(confus.matrix))
+}
+Or_train_svm<-mean(Or_train_svm)
+Or_test_svm<-mean(Or_test_svm)
+##### PCA ####
+#### run lda ####
+###取 7 個pc
+pca <- prcomp(lda_df[,-1], center = TRUE, scale. = TRUE)
+pca_summary<-summary(pca)
+sum(pca_summary$sdev^2>1)
+afterpca<-pca$x[,1:7]
+afterpca<-cbind(食品分類=lda_data2$食品分類,afterpca)
+
+#create the training and testing data
+afterpca<-afterpca |> 
+  as.data.frame()
+afterpca$食品分類<-as.factor(afterpca$食品分類)
+afterpca[,-1]<-apply(afterpca[,-1],2,as.numeric)
+#### LDA ####
+Pca_train_lda<-rep(NA,100)
+Pca_test_lda<-rep(NA,100)
+for (i  in 1:100) {
+  set.seed(i)
+  sample <- sample(c(TRUE, FALSE), nrow(afterpca), replace=TRUE, prob=c(0.7,0.3))
+  train <- afterpca[sample, ] 
+  test <- afterpca[!sample, ]
+  
+  k<-lda(食品分類~.,data=train)
+  train_pred_p<-predict(k, train)
+  (Pca_train_lda[i]<-mean(train_pred_p$class==train$食品分類))
+  test_pred_p<-predict(k, test)
+  
+  (Pca_test_lda[i]<-mean(test_pred_p$class==test$食品分類))
+}
+Pca_train_lda<-mean(Pca_train_lda)
+Pca_test_lda<-mean(Pca_test_lda)
+
+##### svm ####
+svm_data<-afterpca
+library(e1071)
+svm_data$食品分類<-svm_data$食品分類 |> 
+  as.factor()
+smp.size = floor(0.7*nrow(svm_data)) 
+Pca_train_svm <-rep(NA,100)
+Pca_test_svm <-rep(NA,100)
+for (i in 1:100) {
+  set.seed(i)                     
+  train.ind = sample(seq_len(nrow(svm_data)), smp.size)
+  train = svm_data[train.ind, ] # 70%
+  test = svm_data[-train.ind, ] # 30%
+  model = svm(formula =  食品分類~ .,  # 依變數(在這裡是Type)的資料形態要是Factor
+              data = train)
+  
+  # 可以看到SVM預設的參數設定
+  train_pred_p = predict(model, train)
+  test_pred_p = predict(model, test)
+  
+  # 訓練資料的混淆矩陣
+  
+  confus.matrix = table(real=train$食品分類, predict=train_pred_p)
+  Pca_train_svm[i]<-sum(diag(confus.matrix))/sum(confus.matrix)
+  
+  # 測試資料的分類準確率
+  confus.matrix = table(real=test$食品分類, predict=test_pred_p)
+  Pca_test_svm[i]<-sum(diag(confus.matrix))/sum(confus.matrix)
+}
+Pca_test_svm<-mean(Pca_test_svm)
+Pca_train_svm<-mean(Pca_train_svm)
+
+#### fa ####
+
+#https://consumer.fda.gov.tw/Food/TFND.aspx?nodeID=178
+##準備數據
+fa_data<-lda_df[,-1]
+#-----------------
+
+fa_data<-scale(fa_data)
+KMO(fa_data)
+cor_matrix<-cor(fa_data)
+
+#平行分析
+fa.parallel(cor_matrix,  fa="both" ,n.obs = nrow(fa_data), show.legend = TRUE, n.iter = 100)
+
+##10個因子
+
+fa <- fa(r = cor_matrix, 
+         nfactors =8,rotate="varimax", scores="regression",
+         SMC=FALSE, fm="minres")
+m<-(fa_data)%*%fa$loadings
+m<-as.data.frame(cbind(食品分類=lda_df$食品分類,m))
+m2<-m
+#### LDA ####
+m2[,2:ncol(m2)]<-apply(m2[,2:ncol(m2)],2,as.numeric)
+m2[,2:ncol(m2)]<-scale(m2[,2:ncol(m2)])
+#create the training and testing data
+Fa_train_lda<-rep(NA,100)
+Fa_test_lda<-rep(NA,100)
+for (i in 1:100) {
+  set.seed(i)
+  sample <- sample(c(TRUE, FALSE), nrow(m2), replace=TRUE, prob=c(0.7,0.3))
+  train <- m2[sample, ]
+  test <- m2[!sample, ] 
+  k<-lda(食品分類~.,data=train)
+  predicted<-predict(k, train)
+  
+  (Fa_train_lda[i]<-mean(predicted$class==train$食品分類))
+  predicted<-predict(k, test)
+  
+  (Fa_test_lda[i]<-mean(predicted$class==test$食品分類))
+}
+Fa_train_lda<-mean(Fa_train_lda)
+Fa_test_lda<-mean(Fa_test_lda)
+##### svm ####
+svm_data<-as.data.frame(m)
+library(e1071)
+svm_data$食品分類<-svm_data$食品分類 |> 
+  as.factor()
+svm_data[,-1]<-apply(svm_data[,-1],2,as.numeric)
+smp.size = floor(0.7*nrow(svm_data))
+Fa_train_svm<-rep(NA,100)
+Fa_test_svm<-rep(NA,100)
+for (i in 1:100) {
+  set.seed(i)                     
+  train.ind = sample(seq_len(nrow(svm_data)), smp.size)
+  train = svm_data[train.ind, ] # 70%
+  test = svm_data[-train.ind, ] # 30%
+  model = svm(formula =  食品分類~ .,  # 依變數(在這裡是Type)的資料形態要是Factor
+              data = train)
+  # 可以看到SVM預設的參數設定
+  train.pred = predict(model, train)
+  test.pred = predict(model, test)
+  
+  # 訓練資料的混淆矩陣
+  confus.matrix = table(real=train$食品分類, predict=train.pred)
+  (Fa_train_svm[i]<-sum(diag(confus.matrix))/sum(confus.matrix))
+  
+  # 測試資料的分類準確率
+  confus.matrix = table(real=test$食品分類, predict=test.pred)
+  (Fa_test_svm[i]<-sum(diag(confus.matrix))/sum(confus.matrix))
+}
+
+Fa_train_svm<-mean(Fa_train_svm)
+Fa_test_svm<-mean(Fa_test_svm)
